@@ -13,6 +13,7 @@ const RESET_VECTOR: u16 = 0xFFFC;
 impl Registers {
     fn new_chippy() -> Registers {
         return Registers {
+            // In general, giving default values is optional - not really in this case though
             a: 0,
             x: 0,
             y: 0,
@@ -112,7 +113,12 @@ impl Registers {
     }
 }
 
-const ROM_BYTES: &[u8] = include_bytes!("rom.bin");
+// Memory Mario - plumbing, because Rust doesn't* have globals
+// (*mostly)
+struct Memory {
+    ram_bytes: [u8; 0x4000],
+    rom_bytes: &'static [u8],
+}
 
 // Don't forget fn when defining a function.... and say what it returns with -> cool data type to return
 fn read_memory(address: u16) -> u8 {
@@ -176,6 +182,10 @@ fn write_memory(address_we_want_to_store: u16, byte_to_store: u8) {
 }
 
 fn main() {
+    let mut memory = Memory {
+        ram_bytes: [0; 0x4000],
+        rom_bytes: include_bytes!("rom.bin"),
+    };
     // Need to use Registers:: to use new_chippy
     let mut registers = Registers::new_chippy();
     // Rust is loopy.

@@ -1,11 +1,20 @@
 struct Registers {
     a: u8,     // A is for Accumulator
-    x: u8,     // X is for indeX
-    y: u8,     // Y is for whYYYYYYYYYY
+    x: u8,     // X is for indeX (pre-index)
+    y: u8,     // Y is for whYYYYYYYYYY (post-index)
     sp: u8,    // SP is for Stack Pointer
     pc: u16,   // PC is for Program Counter
     flags: u8, // flags is for NV-BDIZC
 }
+
+// C is for Carry: the last addition operation carried over
+// Z is for Zero: the last addition operation resulted in zero
+// I is for Interrupts: whether interrupts are disabled or not
+// D is for Decimal / Dumb: whether we pretend to be a decimal processor instead of a binary one (gross!)
+// B is for Br[ea]k [the program]: whether the last interrupt was actually a BR[ea]K[ the program] instruction in disguise
+// - is for a wire that connects directly to the +5V rail and therefore is always a one (???)
+// V is for oVerflow / Violence / Very strong feelings: FUCK THIS BIT
+// N is for Negative: whether the lasst operation resulted in a negative number
 
 // 2 bytes
 const RESET_VECTOR: u16 = 0xFFFC;
@@ -40,12 +49,12 @@ impl Registers {
         // but Chuck Peddle didn't so WE ARE STUCK FOREVER THANKS CHUCK
         let address = u16::from_le_bytes([
             self.sp, // SSSSSSSS in 00000001_SSSSSSSS
-            0x01, // 00000001 in 00000001_SSSSSSSS
+            0x01,    // 00000001 in 00000001_SSSSSSSS
         ]);
         memory.write_memory(address, thing_to_push);
         self.sp = self.sp.wrapping_sub(1);
     }
-    
+
     fn step(&mut self, memory: &mut Memory) {
         // let opcode = read_memory(self.pc);
         // self.pc += 1;
@@ -68,13 +77,18 @@ impl Registers {
                 // (PusH Accumulator)
                 self.push(memory, self.a);
                 /*
-                    let address = u16::from_le_bytes([
-                        self.sp,
-                        0x01,
-                    ]);
-                    memory.write_memory(address, self.a);
-                    self.sp = self.sp.wrapping_sub(1);
-                    */
+                let address = u16::from_le_bytes([
+                    self.sp,
+                    0x01,
+                ]);
+                memory.write_memory(address, self.a);
+                self.sp = self.sp.wrapping_sub(1);
+                */
+            }
+            0x5A => {
+                // PHY
+                // (PusH Y)
+                self.push(memory, self.y);
             }
             0x85 => {
                 // STA zp
@@ -137,11 +151,33 @@ impl Registers {
                 eprintln!("We are putting a value in A! And it is: 0x{value_to_put_in_a:02X}");
                 self.a = value_to_put_in_a;
             }
+            0xB1 => {
+                // LDA ind,Y
+                // (LoaD Accumulator, zero page INDirect Y-indexed)
+                // Read the next byte. It is the address of...
+                // Also Rust is a pain and makes you use "as" to change sizes
+                let address_of_pointer = self.read_program_byte(memory) as u16;
+                // ...a two-byte pointer, which we read...
+                let the_real_correct_pointer = u16::from_le_bytes([
+                    memory.read_memory(address_of_pointer),
+                    memory.read_memory(address_of_pointer + 1),
+                ]);
+                // ...and add Y to. THIS is the value that we ACTUALLY read.
+                self.a = memory
+                    .read_memory(the_real_correct_pointer + self.y as u16);
+            }
             0xE8 => {
                 // INC X
                 // (INCrement X)
                 // Add 1 to the value in X. Easy, right? ...right? 🦈
                 self.x = self.x.wrapping_add(1);
+            }
+            0xF0 => {
+                // BEQ offset
+                // (Branch if EQual)
+
+                // For real though
+                panic!("Oh fuck we had flags this whole time oh god oh god oh god")
             }
             _ => {
                 todo!("Still learning what opcode 0x{opcode:02X} is...");
@@ -154,26 +190,32 @@ impl Registers {
 // (*mostly)
 struct Memory {
     ram_bytes: [u8; 0x4000],
+    // &'static ← This reference lives forever
+    // [u8] ← some contiguous number of u8s. .. 0 to a bunch
     rom_bytes: &'static [u8],
 }
 
 impl Memory {
     // Example
-// fn read_program_byte(&mut self) -> u8 {
-//     let thing_i_read = read_memory(self.pc);
-//     self.pc += 1;
-//     // putting the variable name at the end returns it
-//     thing_i_read
-// }
+    // fn read_program_byte(&mut self) -> u8 {
+    //     let thing_i_read = read_memory(self.pc);
+    //     self.pc += 1;
+    //     // putting the variable name at the end returns it
+    //     thing_i_read
+    // }
 
-    fn write_memory(&mut self, address_we_want_to_store: u16, byte_to_store: u8) {
-    /*
-    0000 to 3FFF: RAM
-    4000 to 7FFF: IO
-    8000 to FFFF: ROM
-    */
+    fn write_memory(
+        &mut self,
+        address_we_want_to_store: u16,
+        byte_to_store: u8,
+    ) {
+        /*
+        0000 to 3FFF: RAM
+        4000 to 7FFF: IO
+        8000 to FFFF: ROM
+        */
 
-    // address_to_store_at, self.x
+        // address_to_store_at, self.x
 
         if (0x0000..=0x3FFF).contains(&address_we_want_to_store) {
             // Rust makes you use usize here - gross.  "as" is used when converting one type of integer to another
@@ -197,7 +239,9 @@ impl Memory {
             //todo!("This is totally where IO is, address is 0x{address_we_want_to_store:04X} and data is 0x{byte_to_store:02X}.");
         } else {
             // All that's left SHOULD be the ROM range, but check just in case
-            debug_assert!((0x8000..=0xFFFF).contains(&address_we_want_to_store));
+            debug_assert!(
+                (0x8000..=0xFFFF).contains(&address_we_want_to_store)
+            );
             panic!("You can't write to ROM! Not even to address 0x{address_we_want_to_store:04X}! Not even with byte 0x{byte_to_store:04X}!!!");
         }
     }
@@ -215,7 +259,7 @@ impl Memory {
         // Possibility 3:
         //if (0x0000 ..= 0x3FFF).contains(&address)
         if (0x0000..=0x3FFF).contains(&address) {
-            todo!("Something something RAM, address is 0x{address:04X}.");
+            self.ram_bytes[address as usize]
         } else if (0x4000..=0x7FFF).contains(&address) {
             todo!("This is totally where IO is, address is 0x{address:04X}.");
         } else {
@@ -232,6 +276,7 @@ impl Memory {
 
 fn main() {
     let mut memory = Memory {
+        // mirrors the syntax [u8; 0x4000] that defined the type
         ram_bytes: [0; 0x4000],
         rom_bytes: include_bytes!("rom.bin"),
     };
@@ -242,3 +287,7 @@ fn main() {
         registers.step(&mut memory);
     }
 }
+
+// fooのbar
+// Solraのsandwich
+// の = ::

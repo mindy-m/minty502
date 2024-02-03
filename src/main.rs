@@ -1,3 +1,8 @@
+mod addressing_modes;
+use addressing_modes::*;
+mod instructions;
+use instructions::*;
+
 struct Registers {
     a: u8,     // A is for Accumulator
     x: u8,     // X is for indeX (pre-index)
@@ -8,13 +13,21 @@ struct Registers {
 }
 
 // C is for Carry: the last addition operation carried over
+const STATUS_C: u8 = 0b0000_0001;
 // Z is for Zero: the last addition operation resulted in zero
+const STATUS_Z: u8 = 0b0000_0010;
 // I is for Interrupts: whether interrupts are disabled or not
+const STATUS_I: u8 = 0b0000_0100;
 // D is for Decimal / Dumb: whether we pretend to be a decimal processor instead of a binary one (gross!)
+const STATUS_D: u8 = 0b0000_1000;
 // B is for Br[ea]k [the program]: whether the last interrupt was actually a BR[ea]K[ the program] instruction in disguise
+const STATUS_B: u8 = 0b0001_0000;
 // - is for a wire that connects directly to the +5V rail and therefore is always a one (???)
+const STATUS_1: u8 = 0b0010_0000;
 // V is for oVerflow / Violence / Very strong feelings: FUCK THIS BIT
+const STATUS_V: u8 = 0b0100_0000;
 // N is for Negative: whether the lasst operation resulted in a negative number
+const STATUS_N: u8 = 0b1000_0000;
 
 // 2 bytes
 const RESET_VECTOR: u16 = 0xFFFC;
@@ -147,24 +160,12 @@ impl Registers {
             0xA9 => {
                 // LDA #imm
                 // (LoaD A IMMediate)
-                let value_to_put_in_a = self.read_program_byte(memory);
-                eprintln!("We are putting a value in A! And it is: 0x{value_to_put_in_a:02X}");
-                self.a = value_to_put_in_a;
+                self.lda::<Immediate>(memory);
             }
             0xB1 => {
                 // LDA ind,Y
                 // (LoaD Accumulator, zero page INDirect Y-indexed)
-                // Read the next byte. It is the address of...
-                // Also Rust is a pain and makes you use "as" to change sizes
-                let address_of_pointer = self.read_program_byte(memory) as u16;
-                // ...a two-byte pointer, which we read...
-                let the_real_correct_pointer = u16::from_le_bytes([
-                    memory.read_memory(address_of_pointer),
-                    memory.read_memory(address_of_pointer + 1),
-                ]);
-                // ...and add Y to. THIS is the value that we ACTUALLY read.
-                self.a = memory
-                    .read_memory(the_real_correct_pointer + self.y as u16);
+                self.lda::<ZeroPageIndirectYIndexed>(memory);
             }
             0xE8 => {
                 // INC X

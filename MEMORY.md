@@ -10,10 +10,6 @@ Need:
 - ROM
 - IO
 
-
-
-
-
 0000 to 3FFF: RAM
 4000 to 7FFF: IO
 8000 to FFFF: ROM

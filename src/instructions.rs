@@ -12,4 +12,6 @@ impl Registers {
         let value = addressing_mode.read(self, memory);
         self.x = self.status_nz(value);
     }
+
+    //
 }

@@ -3,6 +3,19 @@ use addressing_modes::*;
 mod instructions;
 use instructions::*;
 
+/*
+v this is the page number
+PPPPPPPP_aaaaaaaa
+         ^this is the...rest?
+
+Page 0x00: Zero Page
+Page 0x01: Stack Page
+Page all the rest of the pages don't have fancy names
+
+and this has nothing to do with the modern sense of the word "paging" (except
+    that it's chunks of memory)
+*/
+
 struct Registers {
     a: u8,     // A is for Accumulator
     x: u8,     // X is for indeX (pre-index)
@@ -26,7 +39,7 @@ const STATUS_B: u8 = 0b0001_0000;
 const STATUS_1: u8 = 0b0010_0000;
 // V is for oVerflow / Violence / Very strong feelings: FUCK THIS BIT
 const STATUS_V: u8 = 0b0100_0000;
-// N is for Negative: whether the lasst operation resulted in a negative number
+// N is for Negative: whether the last operation resulted in a negative number
 const STATUS_N: u8 = 0b1000_0000;
 
 // 2 bytes
@@ -44,16 +57,19 @@ impl Registers {
                 memory.read_memory(RESET_VECTOR),
                 memory.read_memory(RESET_VECTOR + 1),
             ]),
-            flags: 0,
+            // This is a lie, currently voltage-free, I don't care if it dies / its ability to handle the truth
+            flags: STATUS_1,
         };
     }
+    /// Read and return the byte that the PC points to. After reading, increment
+    /// the PC. Each call to this function returns the next byte of the program.
     fn read_program_byte(&mut self, memory: &mut Memory) -> u8 {
         let thing_i_read = memory.read_memory(self.pc);
         self.pc += 1;
         // putting the variable name at the end returns it
         thing_i_read
     }
-
+    /// Push a given byte (`thing_to_push`) onto the stack.
     fn push(&mut self, memory: &mut Memory, thing_to_push: u8) {
         // An address on the stack looks like:
         // 00000001_SSSSSSSS
@@ -67,10 +83,25 @@ impl Registers {
         memory.write_memory(address, thing_to_push);
         self.sp = self.sp.wrapping_sub(1);
     }
+    /// Set the N and Z status flags according to this value, and return it.
+    fn status_nz(&mut self, value: u8) -> u8 {
+        if value == 0 {
+            self.flags |= STATUS_Z;
+        } else {
+            self.flags &= !STATUS_Z;
+        }
+        if value & 0x80 != 0 {
+            self.flags |= STATUS_N;
+        } else {
+            self.flags &= !STATUS_N;
+        }
+        value
+    }
 
     fn step(&mut self, memory: &mut Memory) {
-        // let opcode = read_memory(self.pc);
-        // self.pc += 1;
+        // By calling read_program_byte, we no longer need to have this code:
+        //let opcode = read_memory(self.pc);
+        //self.pc += 1;
         let opcode = self.read_program_byte(memory);
 
         // Like a switch, but better, also don't need to put in break
@@ -153,9 +184,10 @@ impl Registers {
                 // LDX #imm
                 // (LoaD X IMMediate)
                 // Read a value from the program and store that value in X
-                let value_to_put_in_x = self.read_program_byte(memory);
-                eprintln!("We are putting a value in X! And it is: 0x{value_to_put_in_x:02X}");
-                self.x = value_to_put_in_x;
+                // let value_to_put_in_x = self.read_program_byte(memory);
+                // eprintln!("We are putting a value in X! And it is: 0x{value_to_put_in_x:02X}");
+                // self.x = value_to_put_in_x;
+                self.ldx::<Immediate>(memory);
             }
             0xA9 => {
                 // LDA #imm

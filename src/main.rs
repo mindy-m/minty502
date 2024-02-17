@@ -86,13 +86,17 @@ impl Registers {
     /// Set the N and Z status flags according to this value, and return it.
     fn status_nz(&mut self, value: u8) -> u8 {
         if value == 0 {
+            // set if zero
             self.flags |= STATUS_Z;
         } else {
+            // clear if not zero
             self.flags &= !STATUS_Z;
         }
         if value & 0x80 != 0 {
+            // set if negative
             self.flags |= STATUS_N;
         } else {
+            // clear if positive
             self.flags &= !STATUS_N;
         }
         value
@@ -113,7 +117,13 @@ impl Registers {
                     self.read_program_byte(memory),
                     self.read_program_byte(memory),
                 ]);
-                // ??? remember where we came from so we can come back ???
+                let pc_bytes = self.pc.to_le_bytes();
+                // maybe not accurate to the real 6502, but it will work
+                // Also, can only push 1 byte at a time.
+                self.push(memory, pc_bytes[0]);
+                self.push(memory, pc_bytes[1]);
+                // (the real 6502 has a weird rule about having to subtract
+                // one...)
                 self.pc = address_to_jump_to;
             }
             0x48 => {
@@ -139,21 +149,24 @@ impl Registers {
                 // (STore Accumulator Zero Page)
                 // on the 6502, the "page" is just the upper byte of the
                 // address. Not to be confused with "paging" on modern CPUs.
-                let address_to_store_at = u16::from_le_bytes([
-                    self.read_program_byte(memory), // le sad 😿
-                    0,
-                ]);
-                memory.write_memory(address_to_store_at, self.a);
+                // let address_to_store_at = u16::from_le_bytes([
+                //     self.read_program_byte(memory), // le sad 😿
+                //     0,
+                // ]);
+                // memory.write_memory(address_to_store_at, self.a);
+
+                self.store::<ZeroPage>(memory, self.a);
             }
             0x8E => {
                 // STX abs
                 // STore X (ABSolute address)
                 // Take the value that's in X and store it at the given address
-                let address_to_store_at = u16::from_le_bytes([
-                    self.read_program_byte(memory),
-                    self.read_program_byte(memory),
-                ]);
-                memory.write_memory(address_to_store_at, self.x);
+                // let address_to_store_at = u16::from_le_bytes([
+                //     self.read_program_byte(memory),
+                //     self.read_program_byte(memory),
+                // ]);
+                // memory.write_memory(address_to_store_at, self.x);
+                self.store::<Absolute>(memory, self.x);
             }
             0x9A => {
                 // TXS
@@ -167,18 +180,15 @@ impl Registers {
             0x9C => {
                 // STZ abs
                 // (STore Zero ABSolute)
-                let address_to_store_at = u16::from_le_bytes([
-                    self.read_program_byte(memory),
-                    self.read_program_byte(memory),
-                ]);
-                memory.write_memory(address_to_store_at, 0);
+                self.store::<Absolute>(memory, 0);
             }
             0xA0 => {
                 // LDY #imm
                 // (LoaD Y IMMediate)
-                let value_to_put_in_y = self.read_program_byte(memory);
-                eprintln!("We are putting a value in Y! And it is: 0x{value_to_put_in_y:02X}");
-                self.y = value_to_put_in_y;
+                // let value_to_put_in_y = self.read_program_byte(memory);
+                // eprintln!("We are putting a value in Y! And it is: 0x{value_to_put_in_y:02X}");
+                // self.y = value_to_put_in_y;
+                self.ldy::<Immediate>(memory);
             }
             0xA2 => {
                 // LDX #imm
@@ -203,7 +213,9 @@ impl Registers {
                 // INC X
                 // (INCrement X)
                 // Add 1 to the value in X. Easy, right? ...right? 🦈
-                self.x = self.x.wrapping_add(1);
+                //self.x = self.x.wrapping_add(1);
+                // Defeat the shark!
+                self.x = self.status_nz(self.x.wrapping_add(1));
             }
             0xF0 => {
                 // BEQ offset

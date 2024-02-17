@@ -19,5 +19,13 @@ impl Registers {
         self.y = self.status_nz(value);
     }
 
+    pub fn store<AM: WritableAddressingMode>(
+        &mut self,
+        memory: &mut Memory,
+        value: u8,
+    ) {
+        let addressing_mode = AM::new(self, memory);
+        addressing_mode.write(self, memory, value);
+    }
     //
 }

@@ -69,6 +69,13 @@ impl Registers {
         // putting the variable name at the end returns it
         thing_i_read
     }
+    /// Read the next byte that the PC points to, interpret it as a branch
+    /// offset, and return the address of the branch target.
+    fn get_branch_target(&mut self, memory: &mut Memory) -> u16 {
+        let branch_offset = self.read_program_byte(memory) as i8 as u16;
+        let branch_target = self.pc.wrapping_add(branch_offset);
+        branch_target
+    }
     /// Push a given byte (`thing_to_push`) onto the stack.
     fn push(&mut self, memory: &mut Memory, thing_to_push: u8) {
         // An address on the stack looks like:
@@ -83,6 +90,26 @@ impl Registers {
         memory.write_memory(address, thing_to_push);
         self.sp = self.sp.wrapping_sub(1);
     }
+    /// Pop a byte from the stack and return it.
+    fn pop(&mut self, memory: &mut Memory) -> u8 {
+        self.sp = self.sp.wrapping_add(1);
+        let address = u16::from_le_bytes([
+            self.sp, // SSSSSSSS in 00000001_SSSSSSSS
+            0x01,    // 00000001 in 00000001_SSSSSSSS
+        ]);
+        // "This is an excellent variable name. I have no notes."
+        // - New York Times (trust me bruh, the article's just paywalled)
+        // "I have always been a great believer in the value, nay, necessity,
+        // of using as many words to communicate your point as are possible,
+        // permissible, and even remotely applicable." - Sir Oscar Wilde, maybe
+        // I concur that to be verbose is to be truely alive - consiseness is for losers, only.  This much is clear.
+        // "They pay me two cents a word!" - Charles Dickens
+        let the_byte_we_read_from_the_stack_just_now =
+            memory.read_memory(address);
+        // Not really better than "ugh" (a far superior return variable name) but okay
+        return the_byte_we_read_from_the_stack_just_now;
+    }
+
     /// Set the N and Z status flags according to this value, and return it.
     fn status_nz(&mut self, value: u8) -> u8 {
         if value == 0 {
@@ -142,7 +169,43 @@ impl Registers {
             0x5A => {
                 // PHY
                 // (PusH Y)
+                // (I am using implied addressing mode)
                 self.push(memory, self.y);
+            }
+            0x60 => {
+                // RTS
+                // ReTurn from Subroutine
+                // (I am also using implied addressing mode)
+                let pc_bytes_1 = self.pop(memory);
+                let pc_bytes_0 = self.pop(memory);
+                let pc_byte_array = [pc_bytes_0, pc_bytes_1];
+                todo!("not play the fox zelda game")
+                // Going to be the opposite of this:
+                //     // JSR
+                //     // Jump to SubRoutine
+                //     let address_to_jump_to = u16::from_le_bytes([
+                //         self.read_program_byte(memory),
+                //         self.read_program_byte(memory),
+                //     ]);
+                //     let pc_bytes = self.pc.to_le_bytes();
+                //     // maybe not accurate to the real 6502, but it will work
+                //     // Also, can only push 1 byte at a time.
+                //     self.push(memory, pc_bytes[0]);
+                //     self.push(memory, pc_bytes[1]);
+                //     // (the real 6502 has a weird rule about having to subtract
+                //     // one...)
+                //     self.pc = address_to_jump_to;
+                // }
+            }
+            0x7A => {
+                // PLY
+                // PuLl Y (pop Y)
+                self.y = self.pop(memory);
+            }
+            0x80 => {
+                // BRA offset
+                // BRanch Always
+                self.pc = self.get_branch_target(memory);
             }
             0x85 => {
                 // STA zp
@@ -156,6 +219,11 @@ impl Registers {
                 // memory.write_memory(address_to_store_at, self.a);
 
                 self.store::<ZeroPage>(memory, self.a);
+            }
+            0x8D => {
+                // STA abs
+                // STore Accumulator (ABSolute address)
+                self.store::<Absolute>(memory, self.a);
             }
             0x8E => {
                 // STX abs
@@ -209,6 +277,11 @@ impl Registers {
                 // (LoaD Accumulator, zero page INDirect Y-indexed)
                 self.lda::<ZeroPageIndirectYIndexed>(memory);
             }
+            0xC8 => {
+                // INY
+                // (INcrement Y)
+                self.y = self.status_nz(self.y.wrapping_add(1));
+            }
             0xE8 => {
                 // INC X
                 // (INCrement X)
@@ -219,10 +292,12 @@ impl Registers {
             }
             0xF0 => {
                 // BEQ offset
-                // (Branch if EQual)
-
-                // For real though
-                panic!("Oh fuck we had flags this whole time oh god oh god oh god")
+                // (Branch if EQual → Branch if the Z bit is *set*)
+                let branch_target = self.get_branch_target(memory);
+                // Doing an AND with STATUS_Z since it only has the bit set that we care about, and we're checking flags only for that bit.
+                if (self.flags & STATUS_Z) == STATUS_Z {
+                    self.pc = branch_target;
+                }
             }
             _ => {
                 todo!("Still learning what opcode 0x{opcode:02X} is...");
@@ -267,7 +342,7 @@ impl Memory {
             self.ram_bytes[address_we_want_to_store as usize] = byte_to_store;
             // println! prints to stdout
             // eprintln! prints to stderr
-            println!("Address is 0x{address_we_want_to_store:04X} and data is 0x{byte_to_store:02X}.");
+            //println!("Address is 0x{address_we_want_to_store:04X} and data is 0x{byte_to_store:02X}.");
         } else if (0x4000..=0x7FFF).contains(&address_we_want_to_store) {
             // & in this case means bitwise ANDing
             if (byte_to_store & 0b1000_0000) != 0 {
@@ -310,10 +385,10 @@ impl Memory {
         } else {
             // All that's left SHOULD be the ROM range, but check just in case
             debug_assert!((0x8000..=0xFFFF).contains(&address));
-            eprintln!(
-                "Reading ROM at 0x{address:04X}, result is 0x{:02X}",
-                self.rom_bytes[address as usize - 0x8000]
-            );
+            // eprintln!(
+            //     "Reading ROM at 0x{address:04X}, result is 0x{:02X}",
+            //     self.rom_bytes[address as usize - 0x8000]
+            // );
             return self.rom_bytes[address as usize - 0x8000];
         }
     }

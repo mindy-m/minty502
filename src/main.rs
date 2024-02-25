@@ -119,7 +119,7 @@ impl Registers {
             // clear if not zero
             self.flags &= !STATUS_Z;
         }
-        if value & 0x80 != 0 {
+        if value & 0b1000_0000 != 0 {
             // set if negative
             self.flags |= STATUS_N;
         } else {
@@ -127,6 +127,17 @@ impl Registers {
             self.flags &= !STATUS_N;
         }
         value
+    }
+    /// Set the C, N, and Z status flags and return the value.
+    fn status_cnz(&mut self, value: u16) -> u8 {
+        if value >= 0b1_0000_0000 {
+            // set if the addition carried past 8 bits
+            self.flags |= STATUS_C;
+        } else {
+            // clear if the addition fit perfectly in 8 bits
+            self.flags &= !STATUS_C;
+        }
+        self.status_nz(value as u8)
     }
 
     fn step(&mut self, memory: &mut Memory) {
@@ -137,6 +148,13 @@ impl Registers {
 
         // Like a switch, but better, also don't need to put in break
         match opcode {
+            0x09 => {
+                // ORA
+                // OR Memory with Accumulator
+                // (Addressing mode is immediate)
+                self.ora::<Immediate>(memory);
+            }
+
             0x20 => {
                 // JSR
                 // Jump to SubRoutine
@@ -152,6 +170,11 @@ impl Registers {
                 // (the real 6502 has a weird rule about having to subtract
                 // one...)
                 self.pc = address_to_jump_to;
+            }
+            0x3A => {
+                // DEA
+                // DEcrement A
+                self.a = self.status_nz(self.a.wrapping_sub(1));
             }
             0x48 => {
                 // PHA
@@ -179,7 +202,8 @@ impl Registers {
                 let pc_bytes_1 = self.pop(memory);
                 let pc_bytes_0 = self.pop(memory);
                 let pc_byte_array = [pc_bytes_0, pc_bytes_1];
-                todo!("not play the fox zelda game")
+                // Needs to know endian-ness, and convert to u16
+                self.pc = u16::from_le_bytes(pc_byte_array);
                 // Going to be the opposite of this:
                 //     // JSR
                 //     // Jump to SubRoutine
@@ -197,6 +221,13 @@ impl Registers {
                 //     self.pc = address_to_jump_to;
                 // }
             }
+
+            0x68 => {
+                // PLA
+                // Pull accumulator from stack
+                self.a = self.pop(memory);
+            }
+
             0x7A => {
                 // PLY
                 // PuLl Y (pop Y)
@@ -205,7 +236,8 @@ impl Registers {
             0x80 => {
                 // BRA offset
                 // BRanch Always
-                self.pc = self.get_branch_target(memory);
+                self.branch_if(memory, true);
+                // self.pc = self.get_branch_target(memory);
             }
             0x85 => {
                 // STA zp
@@ -267,21 +299,74 @@ impl Registers {
                 // self.x = value_to_put_in_x;
                 self.ldx::<Immediate>(memory);
             }
+
+            0xA5 => {
+                // LDA
+                // Load accumulator with memory
+                // (Addressing mode is zero page)
+                self.lda::<ZeroPage>(memory);
+            }
+
             0xA9 => {
                 // LDA #imm
                 // (LoaD A IMMediate)
                 self.lda::<Immediate>(memory);
             }
+
+            0xAD => {
+                // LDA abs
+                // Load accumulator, absolute
+                self.lda::<Absolute>(memory);
+                self.a
+            }
+
+            0xB0 => {
+                // BCS
+                // Branch on carry set
+                // (addressing mode - relative)
+                self.branch_if(memory, (self.flags & STATUS_C) == STATUS_C);
+            }
+
             0xB1 => {
                 // LDA ind,Y
                 // (LoaD Accumulator, zero page INDirect Y-indexed)
                 self.lda::<ZeroPageIndirectYIndexed>(memory);
             }
+
+            0xC6 => {
+                // DEC zpg
+                // Decrememnt memory by one, zero-page
+                // TODO: More stuff
+                todo!()
+            }
+
             0xC8 => {
                 // INY
                 // (INcrement Y)
                 self.y = self.status_nz(self.y.wrapping_add(1));
             }
+
+            0xC9 => {
+                // CMP
+                // Compare Memory with Accumulator
+                // (Addressing mode is immediate)
+                self.cmp::<Immediate>(memory);
+            }
+            0xCB => {
+                // WAI
+                // WAit for Interrupt
+                // but we don't have interrupts
+                // ...
+                // ... heh heh
+                // (Not needed but I hate this)
+            }
+
+            0xD0 => {
+                // BNE rel
+                // Branch if not equal, relative addressing mode
+                self.branch_if(memory, (self.flags & STATUS_Z) != STATUS_Z);
+            }
+
             0xE8 => {
                 // INC X
                 // (INCrement X)
@@ -293,11 +378,12 @@ impl Registers {
             0xF0 => {
                 // BEQ offset
                 // (Branch if EQual → Branch if the Z bit is *set*)
-                let branch_target = self.get_branch_target(memory);
-                // Doing an AND with STATUS_Z since it only has the bit set that we care about, and we're checking flags only for that bit.
-                if (self.flags & STATUS_Z) == STATUS_Z {
-                    self.pc = branch_target;
-                }
+                // let branch_target = self.get_branch_target(memory);
+                // // Doing an AND with STATUS_Z since it only has the bit set that we care about, and we're checking flags only for that bit.
+                // if (self.flags & STATUS_Z) == STATUS_Z {
+                //     self.pc = branch_target;
+                // }
+                self.branch_if(memory, (self.flags & STATUS_Z) == STATUS_Z);
             }
             _ => {
                 todo!("Still learning what opcode 0x{opcode:02X} is...");
@@ -381,7 +467,11 @@ impl Memory {
         if (0x0000..=0x3FFF).contains(&address) {
             self.ram_bytes[address as usize]
         } else if (0x4000..=0x7FFF).contains(&address) {
-            todo!("This is totally where IO is, address is 0x{address:04X}.");
+            // Solra promised to explain this later. Well, it's later!
+            use std::io::Read;
+            let mut buf = [0u8; 1];
+            std::io::stdin().read_exact(&mut buf).unwrap();
+            buf[0]
         } else {
             // All that's left SHOULD be the ROM range, but check just in case
             debug_assert!((0x8000..=0xFFFF).contains(&address));

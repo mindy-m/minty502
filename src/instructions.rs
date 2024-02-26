@@ -73,4 +73,28 @@ impl Registers {
         let resulting_thing = first_thing + second_thing + third_thing;
         self.status_cnz(resulting_thing)
     }
+
+    pub(crate) fn dec<AM: WritableAddressingMode>(
+        &mut self,
+        memory: &mut Memory,
+    ) {
+        // Step 1: Where is the thing?
+        let addressing_mode = AM::new(self, memory);
+        // Step 2: Get the thing
+        let value = addressing_mode.read(self, memory);
+        // Step 3: Decrement the thing
+        // Shadowing nonsense....  :(
+        let value = self.status_nz(value.wrapping_sub(1));
+        // Step 4: Put the thing back
+        addressing_mode.write(self, memory, value);
+    }
+
+    pub(crate) fn adc<AM: ReadableAddressingMode>(
+        &mut self,
+        memory: &mut Memory,
+    ) {
+        let addressing_mode = AM::new(self, memory);
+        let value = addressing_mode.read(self, memory);
+        self.a = self.evil_add(value, (self.flags & STATUS_C) == STATUS_C);
+    }
 }

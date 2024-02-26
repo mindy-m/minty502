@@ -155,6 +155,13 @@ impl Registers {
                 self.ora::<Immediate>(memory);
             }
 
+            0x18 => {
+                // CLC
+                // Clear Carry Flag
+                // Addr: Implied
+                self.flags &= !STATUS_C;
+            }
+
             0x20 => {
                 // JSR
                 // Jump to SubRoutine
@@ -171,6 +178,14 @@ impl Registers {
                 // one...)
                 self.pc = address_to_jump_to;
             }
+
+            0x30 => {
+                //BMI
+                // Branch on Result Minus
+                // Addressing is like, relative
+                self.branch_if(memory, (self.flags & STATUS_N) == STATUS_N);
+            }
+
             0x3A => {
                 // DEA
                 // DEcrement A
@@ -189,6 +204,19 @@ impl Registers {
                 self.sp = self.sp.wrapping_sub(1);
                 */
             }
+
+            0x4C => {
+                // JMP around
+                // Jump to new location
+                // Addr: Indirect
+                let address_to_jump_to = u16::from_le_bytes([
+                    self.read_program_byte(memory),
+                    self.read_program_byte(memory),
+                ]);
+
+                self.pc = address_to_jump_to;
+            }
+
             0x5A => {
                 // PHY
                 // (PusH Y)
@@ -226,6 +254,14 @@ impl Registers {
                 // PLA
                 // Pull accumulator from stack
                 self.a = self.pop(memory);
+            }
+
+            0x69 => {
+                // nice
+                // ADC
+                // Add Memory to Accumulator with Carry
+                // Addr: immediate
+                self.adc::<Immediate>(memory);
             }
 
             0x7A => {
@@ -268,6 +304,14 @@ impl Registers {
                 // memory.write_memory(address_to_store_at, self.x);
                 self.store::<Absolute>(memory, self.x);
             }
+
+            0x90 => {
+                // BCC
+                // Branch on Carry Clear
+                // Addr: Relative
+                self.branch_if(memory, (self.flags & STATUS_C) != STATUS_C);
+            }
+
             0x9A => {
                 // TXS
                 // Transfer X to Stack pointer
@@ -317,7 +361,6 @@ impl Registers {
                 // LDA abs
                 // Load accumulator, absolute
                 self.lda::<Absolute>(memory);
-                self.a
             }
 
             0xB0 => {
@@ -336,8 +379,7 @@ impl Registers {
             0xC6 => {
                 // DEC zpg
                 // Decrememnt memory by one, zero-page
-                // TODO: More stuff
-                todo!()
+                self.dec::<ZeroPage>(memory);
             }
 
             0xC8 => {
